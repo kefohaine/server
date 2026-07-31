@@ -1,7 +1,7 @@
 services:
-  caddy:
+  web:
     image: caddy:2
-    container_name: caddy
+    container_name: web
     restart: unless-stopped
 
     ports:
@@ -9,9 +9,13 @@ services:
       - "443:443"
 
     volumes:
-      - ../:/srv:ro
+      - ../..:/srv:ro
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
+      - ./certs:/certs:ro
 
-volumes:
-  caddy_data:
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
