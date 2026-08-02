@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
     llama-cpp-python
 
-COPY app.py .
+COPY ../../content/ai/app.py .
 
 EXPOSE 8000
 
