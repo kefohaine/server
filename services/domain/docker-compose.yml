@@ -1,7 +1,7 @@
 services:
-  web:
+  domain:
     image: caddy:2
-    container_name: web
+    container_name: domain
     restart: unless-stopped
 
     ports:
