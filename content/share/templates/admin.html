@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>link admin — jehpok.com</title>
+<title>share admin — jehpok.com</title>
 <style>
   :root { --ink:#4a3f3a; --rose:#d49aa0; --gold:#d4a847; --cream:#fdf8f3; --blush:#f5e6e8; }
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -33,7 +33,7 @@
 </style>
 </head>
 <body>
-<h1>link.jehpok.com</h1>
+<h1>share.jehpok.com</h1>
 <p class="sub">admin — Tailscale-only</p>
 
 <form class="create" method="POST" action="/link">
@@ -50,7 +50,7 @@
   <tbody>
   {% for l in links %}
     <tr>
-      <td class="slug"><a href="https://link.jehpok.com/{{ l.slug }}" target="_blank">{{ l.slug }}</a></td>
+      <td class="slug"><a href="https://share.jehpok.com/{{ l.slug }}" target="_blank">{{ l.slug }}</a></td>
       <td class="target" title="{{ l.target }}">{{ l.target }}</td>
       <td class="hits">{{ l.hits }}</td>
       <td>
@@ -67,6 +67,6 @@
 <p class="empty">No links yet. Add one above.</p>
 {% endif %}
 
-<p class="pub" style="margin-top:24px">Public redirects: <a href="https://link.jehpok.com">link.jehpok.com</a></p>
+<p class="pub" style="margin-top:24px">Public redirects: <a href="https://share.jehpok.com">share.jehpok.com</a></p>
 </body>
 </html>
