@@ -1,8 +1,8 @@
 services:
-  link:
+  share:
     build: .
-    image: jehpok/link:1
-    container_name: link
+    image: jehpok/share:1
+    container_name: share
     restart: unless-stopped
 
     expose:
@@ -16,8 +16,8 @@ services:
       start_period: 10s
 
     volumes:
-      - /var/www/github/jehpok.com/link/db:/data
-      - ../../content/link:/app/src:ro
+      - /var/www/github/jehpok.com/share/db:/data
+      - ../../content/share:/app/src:ro
 
     logging:
       driver: json-file
