@@ -26,8 +26,8 @@ services:
         max-size: "10m"
         max-file: "3"
 
-    # Pin the bridge IP — services/domain/Caddyfile hardcodes
-    # 172.22.0.3:5000 for the share upstream (both @share on server.jehpok.com
+    # Pin the bridge IP — services/vhosts/Caddyfile hardcodes
+    # 172.22.0.3:5000 for the share-flask upstream (both @share on server.jehpok.com
     # and the main reverse_proxy on share.jehpok.com).
     networks:
       net:

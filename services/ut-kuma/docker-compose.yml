@@ -27,8 +27,8 @@ services:
         max-size: "10m"
         max-file: "3"
 
-    # Pin the bridge IP — services/domain/Caddyfile hardcodes
-    # 172.22.0.6:3001 for the kuma upstream.
+    # Pin the bridge IP — services/vhosts/Caddyfile hardcodes
+    # 172.22.0.6:3001 for the ut-kuma upstream.
     networks:
       net:
         ipv4_address: 172.22.0.6
