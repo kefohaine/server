@@ -6,11 +6,11 @@ echo "=== $(date) ===" >> "$LOG"
 
 cd /var/www/custom/projects/jehpok/repo
 
-# Refresh: apt + image pull + up-all. Backup-all: all five backup recipes
-# (now includes backup-mc, which tars the world folder — needs the
-# game container stopped first so region files are quiescent). Clean-all:
+# update: apt + image pull + up-all. bkp-all: all four bkp-* recipes
+# (now includes bkp-mc, which tars the world folder — needs the
+# game container stopped first so region files are quiescent). clean-all:
 # docker prune + apt autoremove + prune old backups.
-make refresh       >> "$LOG" 2>&1
+make update        >> "$LOG" 2>&1
 
 # Stop the game container so the world tar is consistent — but only if it
 # was running. If the operator had intentionally stopped the server
@@ -26,9 +26,9 @@ trap '
     docker start mc >> "$LOG" 2>&1 || echo "mc restart failed" >> "$LOG"
   fi
 ' EXIT
-make backup-all    >> "$LOG" 2>&1 || echo "backup-all failed" >> "$LOG"
+make bkp-all       >> "$LOG" 2>&1 || echo "bkp-all failed" >> "$LOG"
 trap - EXIT
-# backup-all ran cleanly. Restore the pre-backup state. If the operator
+# bkp-all ran cleanly. Restore the pre-backup state. If the operator
 # had it running, restart it now.
 if [ "$MC_WAS_RUNNING" = "true" ]; then
   docker start mc >> "$LOG" 2>&1 || echo "mc restart failed" >> "$LOG"
