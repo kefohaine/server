@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fetch Geyser + Floodgate Spigot JARs if missing.
-# Runs inside the minecraft container before the server starts.
+# Runs inside the mc container before the server starts.
 # itzg/minecraft-server does not auto-install cross-platform plugins; this
 # fills the gap so a fresh volume still ends up Java + Bedrock.
 
