@@ -3,14 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: caddy-dns:local
-    container_name: vhosts
+    image: fxmq.net:local
+    container_name: fxmq.net
     restart: unless-stopped
 
     # Host network so Caddy sees the real client source IP — without it,
     # Docker DNAT rewrites every packet to 172.22.0.1 (the bridge gateway)
     # before Caddy sees it, which breaks the @not_tailnet remote_ip matcher
-    # on https://server.homelab.com. The host network namespace is on the
+    # on https://shell.fxmq.net. The host network namespace is on the
     # `net` bridge at 172.22.0.0/16, so Caddy can still reach upstream
     # containers by their bridge IP (172.22.0.2 .. .9 — see Caddyfile).
     network_mode: host
@@ -22,9 +22,7 @@ services:
       retries: 3
 
     volumes:
-      - ../..:/srv:ro
       - /var/www/custom/projects/homelab/cloud/html:/nextcloud:ro
-      - /var/www/custom/projects/homelab/share/files:/files:ro
       # Top-level Caddyfile + per-vhost snippets. The dir is mounted so
       # the `import` directives in the top-level file resolve relative
       # paths (Caddy treats imports as relative to the importing file).
