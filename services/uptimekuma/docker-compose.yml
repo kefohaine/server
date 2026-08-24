@@ -1,7 +1,7 @@
 services:
   kuma:
     image: louislam/uptime-kuma:1
-    container_name: ut-kuma
+    container_name: uptimekuma
     restart: unless-stopped
 
     expose:
@@ -28,7 +28,7 @@ services:
         max-file: "3"
 
     # Pin the bridge IP — services/vhosts/Caddyfile hardcodes
-    # 172.22.0.6:3001 for the ut-kuma upstream.
+    # 172.22.0.6:3001 for the uptimekuma upstream.
     networks:
       net:
         ipv4_address: 172.22.0.6
