@@ -1,12 +1,12 @@
 services:
-  mail:
+  mailserver:
     # Docker Mailserver (Postfix + Dovecot). One container, monthly releases,
     # DKIM/DMARC/fail2ban/Rspamd built in. TLS is the per-vhost LE cert Caddy
     # issues for mail.fxmq.net — mounted read-only from caddy_data and reused
     # for SMTP/IMAP (SSL_TYPE=manual; DMS's changedetector reloads postfix +
     # dovecot when the cert file changes, so LE renewal needs no restart).
     image: ghcr.io/docker-mailserver/docker-mailserver:latest
-    container_name: mail
+    container_name: mailserver
     hostname: mail.fxmq.net
     restart: unless-stopped
 
@@ -38,10 +38,10 @@ services:
       - "993:993"
 
     volumes:
-      - /var/www/custom/projects/homelab/mail/data:/var/mail
-      - /var/www/custom/projects/homelab/mail/state:/var/mail-state
-      - /var/www/custom/projects/homelab/mail/logs:/var/log/mail
-      - /var/www/custom/projects/homelab/mail/config:/tmp/docker-mailserver
+      - /var/www/custom/projects/homelab/mailserver/data:/var/mail
+      - /var/www/custom/projects/homelab/mailserver/state:/var/mail-state
+      - /var/www/custom/projects/homelab/mailserver/logs:/var/log/mail
+      - /var/www/custom/projects/homelab/mailserver/config:/tmp/docker-mailserver
       - /var/www/custom/projects/homelab/caddy_data:/caddy:ro
       - /etc/localtime:/etc/localtime:ro
 
@@ -64,16 +64,16 @@ services:
     environment:
       ROUNDCUBEMAIL_DB_TYPE: sqlite
       # SQLite DB lives in the bind mount below (image default /var/roundcube/db).
-      ROUNDCUBEMAIL_DEFAULT_HOST: mail
+      ROUNDCUBEMAIL_DEFAULT_HOST: mailserver
       ROUNDCUBEMAIL_DEFAULT_PORT: 143
       # Note: the entrypoint reads SMTP_SERVER (not SMTP_HOST).
-      ROUNDCUBEMAIL_SMTP_SERVER: mail
+      ROUNDCUBEMAIL_SMTP_SERVER: mailserver
       ROUNDCUBEMAIL_SMTP_PORT: 587
       # Users log in with just their local part (e.g. admin).
       ROUNDCUBEMAIL_USERNAME_DOMAIN: fxmq.net
 
     volumes:
-      - /var/www/custom/projects/homelab/mail/roundcube:/var/roundcube/db
+      - /var/www/custom/projects/homelab/mailserver/roundcube:/var/roundcube/db
       # STARTTLS overrides (see file header) — included by the entrypoint.
       - ./roundcube-tls.inc.php:/var/roundcube/config/roundcube-tls.inc.php:ro
 
