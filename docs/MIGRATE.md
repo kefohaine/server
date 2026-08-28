@@ -1,100 +1,47 @@
-# Migration
+# Migration (new VPS, new domain) — script-first
 
-Step-by-step runbook for moving jehpok.com to a new VPS. The four `make backup-*` recipes and `make setup` are the only recipes this runbook calls; everything else is operator-issued shell. Run `make migrate` to print this file.
+The primary path is `scripts/install.sh` — a plug-and-play installer. It prompts for three values (domain, Cloudflare API token, Tailscale auth key), then runs unattended. It creates the `op` user, installs host services (docker, tailscale, dnsmasq, ttyd, daily timer, ssh hardening, ufw, sysctl), clones the repo, renames it for the new domain, and brings up exactly four containers: Caddy (renamed `vhosts` → `$DOMAIN`), `nextcloud`, `vaultwarden`, `uptimekuma`. It also creates the Cloudflare A records (`cloud`/`vault`/`kuma`, proxied), sets the zone SSL mode to full, triggers Let's Encrypt issuance, and seeds Uptime Kuma (admin account included).
 
-## 1. On the OLD VPS
-
-Run all four backups in one shot:
+## Run it
 
 ```
-make backup-all
+scp scripts/install.sh root@<new-vps>:
+ssh root@<new-vps>
+bash install.sh
 ```
 
-This produces four artifacts at the project root (`$(REPO)`): a `cloud-backup-<date>` directory, a `share-backup-<date>.db` file, a `vault-backup-<date>.tar.gz` archive, and a `secrets-backup/secrets-<date>.tar.gz` bundle.
+Enter the domain, CF token, and TS auth key when prompted. The script hands off to user `op` and runs unattended; full log at `/var/log/homelab-install.log`. Errors are printed numbered at the end, then a success summary with credentials.
 
-## 2. Download OFF the old VPS
+## What the script renames (expects a pre-migration clone)
 
-Move the four artifacts off the VPS — the secrets bundle contains private keys and the Tailscale identity state:
+The installer's `renames()` step transforms a clone that still carries the old names. The canonical repo has already been migrated (fxmq.net / `op` / `shell.` since Aug 2026), so re-running `install.sh` against a current clone fails at `mv services/vhosts services/$DOMAIN` — the rename steps are not yet idempotent (tracked in `docs/ISSUES.md`).
 
-- `$(REPO)/secrets-backup/secrets-<date>.tar.gz`
-- `$(REPO)/cloud-backup-<date>`
-- `$(REPO)/share-backup-<date>.db`
-- `$(REPO)/vault-backup-<date>.tar.gz`
+- `homelab.com` → `$DOMAIN` — every Caddy vhost, dnsmasq, compose env, Kuma seed
+- `server.$DOMAIN` → `shell.$DOMAIN` — the tailnet-only vhost and the dnsmasq `address=` line
+- `debian` → `op` — user, sudoers, sshd `AllowUsers`, ttyd/daily units, Makefile ownership
+- `services/vhosts` → `services/$DOMAIN` — caddy container + image renamed to `$DOMAIN`
+- Container set trimmed to 4 — homer, share-flask, mc, mc-flask removed (their Caddy vhosts, Makefile recipes, daily.sh mc block, and Kuma monitors too)
 
-## 3. On the NEW VPS (Debian)
+## Prerequisites (manual, unavoidable)
 
-Become root for system installs and unit restoration, then drop to `debian` for the rest. Run as root:
+- Cloudflare zone `$DOMAIN` exists; API token with `Zone > DNS > Edit` for that zone.
+- Tailscale auth key (admin console → Settings → Keys).
+- New VPS SSH key on GitHub — the script generates one and prints the pubkey; add it and re-run (state is saved, prompts are skipped).
 
-Install Debian packages, Ollama, and Tailscale:
+## After the script finishes
 
-```
-apt update && apt install -y docker.io docker-compose-plugin git curl make sudo dnsmasq ufw
-curl -fsSL https://ollama.com/install.sh | sh
-curl -fsSL https://tailscale.com/install.sh | sh
-tailscale up
-```
+1. The installer lists the Tailscale split-DNS entry (`$DOMAIN` → the new VPS Tailscale IP) as an **expected** manual step in its error/re-check loop — it cannot be set with just an auth key. Confirm it in the admin console and the loop clears it; without it `shell.$DOMAIN` won't resolve for tailnet devices.
+2. Optional: Cloudflare WAF rule skip for `cloud.$DOMAIN` — Nextcloud desktop sync is bot-challenged otherwise (see `Intended` in `docs/ISSUES.md`).
+3. Doc pass: done for the Aug 2026 migration — the canonical repo now carries the `fxmq.net` / `op` / `shell.` names in code, docs, and Makefile.
 
-Restore the secrets bundle (drops unit files, SSH keys, dnsmasq config, and Tailscale state into place):
+## Minecraft server (PufferPanel + Geyser)
 
-```
-sudo tar xzf secrets-<date>.tar.gz -C /
-sudo chown -R debian:debian /home/debian/.ssh
-sudo chmod 600 /home/debian/.ssh/github_key
-```
+The Minecraft stack is **not** part of `install.sh`'s container set — the panel (`services/pufferpanel/`) is added post-install; the game server itself is operator-managed (no sleep/wake stack — lazymc and mc-idle-sleeper were removed 2026-08-28). To carry it to a new VPS:
 
-Restore the Nextcloud data directory to the host bind-mount path the `cloud` compose file expects (see `services/cloud/docker-compose.yml` for the bind source; the destination inside the container is `/data`):
+1. The repo carries everything reproducible: the server template `config/pufferpanel/servers/2ecfbe8c.json` and the UFW ports (already in `install.sh`). After the base install: create the panel server from the template JSON (copy into `puffer/data/servers/<id>.json`) and start the game once from the panel UI so the daemon creates the container.
+2. Operator-only (not in repo, copy from the old host): the game server data dir `puffer/data/servers/2ecfbe8c/` (world, jars, plugin jars, Geyser cache/locales).
+3. Gotchas that must hold on the new host: the panel template writes `server.properties` at install from its `ip`/`port` data fields (the live server currently binds `server-ip=0.0.0.0` / `server-port=25565`); RCON disabled; the game domain's CF A record is DNS-only.
 
-```
-sudo mkdir -p $(REPO)/cloud/html $(REPO)/cloud/users
-sudo cp -a cloud-backup-<date>/html/* $(REPO)/cloud/html/
-sudo cp -a cloud-backup-<date>/users/* $(REPO)/cloud/users/
-echo '# Nextcloud data directory' | sudo tee $(REPO)/cloud/users/.ncdata
-sudo chown -R 33:33 $(REPO)/cloud/html $(REPO)/cloud/users
-```
+## Manual fallback
 
-Restore the shortener SQLite DB:
-
-```
-sudo mkdir -p $(REPO)/share/db
-sudo cp share-backup-<date>.db $(REPO)/share/db/links.db
-```
-
-Restore the Vaultwarden data dir:
-
-```
-sudo mkdir -p $(REPO)/vault
-sudo tar xzf vault-backup-<date>.tar.gz -C $(REPO)/vault
-sudo chown -R 1000:1000 $(REPO)/vault/data
-```
-
-Drop to the `debian` user, clone the repo, drop the Nextcloud `.env` in place, create the external Docker network, and bootstrap:
-
-```
-git clone git@github.com:friedutch/jehpok.com.git $(REPO)/repo
-cp <your-.env> $(REPO)/repo/services/cloud/.env
-docker network create net
-make -C $(REPO)/repo setup
-make -C $(REPO)/repo up-all
-```
-
-`make setup` is idempotent: it installs ttyd, copies reference configs into host paths, enables the systemd units (ollama, ttyd, dnsmasq, sshd, jehpok-daily.timer), opens the UFW rule for ttyd, and deploys the project-level Claude Code safety rail from `setup/claude/settings.local.json`. `make up-all` brings up the six containers in dependency order.
-
-## 4. Update Cloudflare DNS
-
-Point `jehpok.com` (and any subdomains serving traffic) at the new VPS IP.
-
-## 5. Verify
-
-Tail each container's logs to confirm clean startup:
-
-```
-make logs-all
-```
-
-And hit the public landing page to confirm Caddy is serving:
-
-```
-curl -sk --resolve www.jehpok.com:443:127.0.0.1 https://www.jehpok.com/
-```
-
-The tailnet routes (`server.jehpok.com/{,/share,/mc,/shell}`) are unreachable from a fresh VPS without Tailscale; verify those after `make setup` from a tailnet-joined device, not from the VPS host itself.
+If the script can't be used, it automates exactly: host packages + `op` user + sshd hardening + docker daemon.json + `tailscale up` + ufw + repo clone + the renames above + `docker network create net --subnet=172.22.0.0/16` + `make install-config` + `make d-recreate-$DOMAIN|d-recreate-nextcloud|d-recreate-vaultwarden|d-recreate-uptimekuma` + CF DNS records + cert triggers. Optional data restore: `rsync` `cloud/users`, `vault/data`, `kuma/data` from the old host before first start (then `chown -R 33:33 cloud/users` and touch `cloud/users/.ncdata`).

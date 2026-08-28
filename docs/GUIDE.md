@@ -1,6 +1,6 @@
 # Project guide
 
-How to operate `jehpok.com` — the project's repository layout, deployment commands, protected host resources, per-service edit-safe facts, and operational gotchas. Read this before editing anything.
+How to operate `fxmq.net` — the project's repository layout, deployment commands, protected host resources, per-service edit-safe facts, and operational gotchas. Read this before editing anything.
 
 For system architecture and design rationale, see `README.md`. For agent rules, see `docs/AGENTS.md`. For open problems and improvements, see `docs/ISSUES.md`.
 
@@ -8,9 +8,9 @@ For system architecture and design rationale, see `README.md`. For agent rules, 
 
 The repo splits into four directories. `ls` is the source of truth — what's described here is the intent, not the full inventory.
 
-- `services/<svc>/docker-compose.yml` — one per running service. Compose files are the source of truth for images, env vars, ports, volumes, healthchecks, and logging.
-- `setup/` — reference copies of host-level configs (Ollama systemd unit, SSH hardening, dnsmasq, maintenance timer + script, Claude Code deny-list). Restored to live paths by `make setup`.
-- `content/` — app sources and static files mounted into containers. Container app source lives here, not under `services/`, so edits take effect with `make restart-<svc>` and the image only carries the runtime.
+- `services/<ctn>/docker-compose.yml` — one per running container. Compose files are the source of truth for images, env vars, ports, volumes, healthchecks, and logging.
+- `config/` — reference copies of host-level configs (goose systemd unit, SSH hardening, dnsmasq, ttyd, maintenance timer + script, sysctl, Claude Code deny-list). Restored to live paths by `make install-config`. For an offline copy of the whole `config/` tree, use `make bundle-config`.
+- `content/` — app sources and static files mounted into containers. Currently empty after the migration trimmed the service set; the directory is kept for future app containers.
 - `docs/` — `AGENTS.md`, `GUIDE.md` (this file), `ISSUES.md`, `MIGRATE.md` (runbook for moving to a new VPS; printed by `make migrate`).
 
 ## Deployment
@@ -19,106 +19,133 @@ Manual — no CI/CD, pushes to `main` trigger nothing. Use the `Makefile` recipe
 
 ### First-time setup and migration
 
-`make migrate` prints the full step-by-step runbook.
+`scripts/install.sh` is the plug-and-play path: it prompts for the domain, Cloudflare API token, and Tailscale auth key, then runs unattended — host services, docker, tailscale, the four containers (Caddy, `nextcloud`, `vaultwarden`, `uptimekuma`), Cloudflare DNS records, and certs. `make migrate` prints the manual runbook (`docs/MIGRATE.md`).
 
 ### CMD Sheet
 
 ```bash
 make                   # default: print help with categories
-make up-all            # start/recreate all containers in order (share, domain, cloud, vault, kuma, homer, minecraft)
-make backup-all        # run all four backup recipes in order (cloud, share, vault, secrets)
+make d-recreate-all    # start/recreate all containers in order (fxmq.net, nextcloud, vaultwarden, uptimekuma)
+make d-restart-all     # restart every container + dnsmasq + ttyd
+make d-logs-all        # tail all container logs in one stream, each line prefixed with [container]
+make bkp-all           # chain bkp-cloud + bkp-vault in order
 make clean-all         # chain: clean-docker + clean-apt + clean-backups
-make up-<service>      # force-recreate one container — up-domain | up-cloud | up-share | up-vault | up-kuma | up-homer | up-minecraft
-make restart-<service> # restart every service in the compose file — after editing a mounted config; minecraft restarts both minecraft and minecraft-web
-make restart-all       # restart every container + dnsmasq + ttyd — same order as up-all
-make restart-dnsmasq   # restart the host dnsmasq resolver — after editing setup/dnsmasq/10-tailnet.conf
-make restart-ttyd      # restart the host ttyd service — after editing setup/ttyd/ttyd.service
-make logs-all          # tail all container logs in one stream, each line prefixed with [container]
-make logs-<service>    # follow one container's logs — logs-domain | logs-cloud | logs-share | logs-vault | logs-kuma | logs-homer | logs-minecraft
+make d-recreate-<ctn>  # force-recreate one container — d-recreate-fxmq.net (rebuilds) | d-recreate-nextcloud | d-recreate-vaultwarden | d-recreate-uptimekuma | d-recreate-pufferpanel
+make d-restart-<ctn>   # restart every container in the compose file — after editing a mounted config
+make restart-dnsmasq   # restart the host dnsmasq resolver — after editing config/dnsmasq/10-tailnet.conf
+make restart-ttyd      # restart the host ttyd service — after editing config/ttyd/ttyd.service
+make d-logs-<ctn>      # follow one container's logs
 make logs-dnsmasq      # follow the dnsmasq journal
 make logs-ttyd         # follow the ttyd journal
 make status            # show a table of all running containers + host systemd units
-make refresh           # apt update/upgrade + pull all images + make up-all
-make setup             # one-shot host bootstrap: install ttyd, copy reference configs, enable Ollama + ttyd + sshd + dnsmasq + daily maintenance timer, open UFW rule, restore Claude settings
+make update            # apt update/upgrade + pull all images + make d-recreate-all
+make install-config    # one-shot host bootstrap: install ttyd, copy config/ to live, enable goose + ttyd + sshd + dnsmasq + daily maintenance timer, open UFW rule, restore Claude settings
+make bundle-secrets    # collect live secrets into $(REPO)/backups/secrets-bundle-<date>.tar.gz (not chained into bkp-all)
+make install-secrets   # extract a secrets bundle to live paths (BUNDLE=<path> to override)
+make bundle-config     # snapshot $(REPO)/repo/config/ into $(REPO)/backups/config-bundle-<date>.tar.gz (offline copy)
+make install-config-bundle  # extract a config bundle into $(REPO)/repo/config/ (BUNDLE=<path> to override)
 make migrate           # cat docs/MIGRATE.md — the full VPS-to-VPS migration runbook
-make push MSG="..."    # stage, commit, and push to the jehpok.com remote
-make backup-cloud      # snapshot Nextcloud data (maintenance mode on during the copy)
-make backup-share      # copy the shortener SQLite DB to /var/www/custom/projects/jehpok/share-backup-<date>.db
-make backup-vault      # tar the Vaultwarden data dir to /var/www/custom/projects/jehpok/vault-backup-<date>.tar.gz
-make backup-secrets    # bundle certs, SSH keys, Ollama + ttyd units, dnsmasq config, and Tailscale state for off-VPS storage
+make kuma-import       # import an adapted Uptime Kuma db from another host (KUMA_DB=/path)
+make git-add           # git add -A in $(REPO)/repo
+make git-com MSG="…"   # git commit -m MSG (MSG required)
+make git-push          # git push homelab main
+make git-all MSG="…"   # shortcut: stage + commit + push
+make bkp-cloud         # snapshot Nextcloud data (maintenance mode on during the copy)
+make bkp-vault         # tar the Vaultwarden data dir to $(REPO)/backups/vault-backup-<date>.tar.gz
+make bkp-list          # list every artifact under $(REPO)/backups/ + count per pattern
 make clean-docker      # prune builder / image / container
 make clean-apt         # apt autoremove + clean
 make clean-backups     # keep latest 3 backups per pattern, delete older
+make tmux-new NAME=<n> # create a detached tmux session <n>
+make tmux-open NAME=<n># attach to session <n> (Ctrl-b d to detach)
+make tmux-kill NAME=<n># kill session <n>
+make tmux-list         # list sessions (prints "No tmux sessions." when none)
 ```
+
+When a recipe covers the task, use the recipe. Raw `git`, `docker compose`, `docker exec`, `systemctl restart`, and `tar` are reserved for cases no recipe covers (one-off diagnostics the operator asked for, log/file inspection, ad-hoc reads).
+
+`make git-com MSG="…"` and `make git-all MSG="…"` take a single-sentence `MSG` only. Two quoting constraints: embedded newlines break the `git commit -m "..."` quoting through `bash -c` and fail with `unexpected EOF` before the commit lands, and embedded double-quote characters break the recipe's own `$(MSG)` substitution (the recipe's `[-z "$(MSG)"]` check sees word-split fragments and errors with `[: too many arguments]`, then `git commit -m` interprets the unquoted remainder as paths). If the message needs a quote mark, wrap the whole `MSG=` in single quotes (`make git-com MSG='…'`) — the shell does not interpolate inside single quotes, so the embedded `"` survives intact. The diff speaks for itself; the message only needs to round-trip through bash.
 
 ## Protected host resources
 
 **Never delete or disable any of these without explicit operator approval.** Per `docs/AGENTS.md` safety rule 1, if a task seems to require removing any of them, stop and ask.
 
-- `/etc/systemd/system/ollama.service` — Ollama systemd unit (`enabled`, `Restart=always`).
+- `/etc/systemd/system/goose.service` — goose agent systemd unit (`enabled`, `Restart=always`).
 - `/etc/systemd/system/ttyd.service` — ttyd web-terminal unit (`enabled`, `Restart=always`). Binds `172.22.0.1:7681` only (host bridge IP), gated by the Caddy tailnet match and the UFW INPUT allow from `172.22.0.0/16`.
-- `/etc/dnsmasq.d/10-tailnet.conf` and `/etc/systemd/system/dnsmasq.service.d/override.conf` — host DNS resolver + systemd drop-in (`Restart=always`).
-- `/var/www/custom/projects/jehpok/certs/` — Cloudflare Origin cert + key (wildcard `*.jehpok.com`).
-- `/var/www/custom/projects/jehpok/cloud/html/` and `/var/www/custom/projects/jehpok/cloud/users/` — Nextcloud bind mounts (html root + datadirectory; both owned by uid 33 with a `.ncdata` marker in `users/`).
-- `net` Docker network — user-defined bridge, `external: true`. Reused by all inter-container services.
-- SSH keys, Nextcloud data, Vaultwarden data, shortener DB, uploaded files — user-only (also `docs/AGENTS.md` safety rules 7 and 8).
+- `/etc/dnsmasq.d/10-tailnet.conf` and `/etc/systemd/system/dnsmasq.service.d/override.conf` — host DNS resolver + systemd drop-in (`Restart=always`). Binds `100.117.144.0:53` (the Tailscale IP).
+- `/var/www/custom/projects/homelab/certs/` — RETIRED. The wildcard Cloudflare Origin cert that used to live here is no longer referenced by any vhost (the per-vhost ACME certs serve every hostname). The directory and the files inside it are kept on disk for audit/history but can be deleted without breaking the running system.
+- `/var/www/custom/projects/homelab/caddy_data/` — Caddy runtime data dir (LE certs under `caddy/acme/`, ACME account keys, OCSP staples) and the `CF_API_TOKEN` file used for per-vhost ACME DNS-01. The Caddy container bind-mounts this dir at `/data` so certs persist across container recreates. The `CF_API_TOKEN` file is created by the operator (see `docs/MIGRATE.md`); do not commit it.
+- `/var/www/custom/projects/homelab/cloud/html/` and `/var/www/custom/projects/homelab/cloud/users/` — Nextcloud bind mounts (html root + datadirectory; both owned by uid 33 with a `.ncdata` marker in `users/`).
+- `net` Docker network — user-defined bridge, `external: true`, subnet `172.22.0.0/16`. Reused by all inter-container services.
+- SSH keys, Nextcloud data, Vaultwarden data, uploaded files — user-only (also `docs/AGENTS.md` safety rules 7 and 8).
 
 ## SSH access
 
-SSH is restricted to the Tailscale network only — the public internet cannot reach port 22. Password auth is disabled, root login is disabled, `AllowUsers debian` only. Config: `/etc/ssh/sshd_config.d/50-cloud-init.conf`.
+SSH is restricted to the Tailscale network only — the public internet cannot reach port 22. Password auth is disabled; root login is key-only (`PermitRootLogin prohibit-password`); `AllowUsers op root`. Config: `/etc/ssh/sshd_config.d/50-cloud-init.conf`. The installer (`scripts/install.sh`) writes this file for user `op` and keeps root key access.
 
 ## Service reference
 
 The compose files are the source of truth. This table is the one-line reference for each service.
 
-| Service  | Compose                                 | Container | Edit mounted config          | After compose / image change |
-|----------|-----------------------------------------|-----------|------------------------------|------------------------------|
-| domain   | `services/domain/docker-compose.yml`    | `domain`  | `make restart-domain`        | `make up-domain`             |
-| cloud    | `services/cloud/docker-compose.yml`     | `cloud`   | `make restart-cloud`         | `make up-cloud`              |
-| share    | `services/share/docker-compose.yml`     | `share`   | `make restart-share`         | `make up-share`              |
-| vault    | `services/vault/docker-compose.yml`     | `vault`   | `make restart-vault`         | `make up-vault`              |
-| kuma     | `services/kuma/docker-compose.yml`      | `kuma`    | `make restart-kuma`          | `make up-kuma`               |
-| homer    | `services/homer/docker-compose.yml`     | `homer`   | `make restart-homer`         | `make up-homer`              |
-| minecraft| `services/minecraft/docker-compose.yml` | `minecraft`+`minecraft-web` | `make restart-minecraft`    | `make up-minecraft` (builds `minecraft-web` locally) |
-| terminal | n/a (host systemd; see Protected host resources) | n/a | `make restart-ttyd`          | `make setup` (reinstall)     |
-| dnsmasq  | n/a (host systemd)                      | n/a       | `make restart-dns`           | n/a                          |
-| ollama   | n/a (host systemd; see Protected host resources) | n/a | `systemctl restart ollama`   | n/a                          |
+| Service | Compose | Container | Edit mounted config | After compose / image change |
+|---------|---------|-----------|---------------------|------------------------------|
+| caddy   | `services/fxmq.net/docker-compose.yml` | `fxmq.net` | `make d-restart-fxmq.net` | `make d-recreate-fxmq.net` (rebuilds `fxmq.net:local` from `services/fxmq.net/Dockerfile`) |
+| cloud   | `services/nextcloud/docker-compose.yml` | `nextcloud` | `make d-restart-nextcloud` | `make d-recreate-nextcloud` |
+| vault   | `services/vaultwarden/docker-compose.yml` | `vaultwarden` | `make d-restart-vaultwarden` | `make d-recreate-vaultwarden` |
+| kuma    | `services/uptimekuma/docker-compose.yml` | `uptimekuma` | `make d-restart-uptimekuma` | `make d-recreate-uptimekuma` |
+| panel   | `services/pufferpanel/docker-compose.yml` | `pufferpanel` | `make d-restart-pufferpanel` | `make d-recreate-pufferpanel` |
+| terminal | n/a (host systemd; see Protected host resources) | n/a | `make restart-ttyd` | `make install-config` (reinstall) |
+| dnsmasq | n/a (host systemd) | n/a | `make restart-dnsmasq` | n/a |
+| goose   | n/a (host systemd; see Protected host resources) | n/a | `systemctl restart goose` | n/a |
 
-The `net` Docker network is `external: true` — create once with `docker network create net` on a fresh host. All inter-container services use `expose`, not `ports`. The exception is `domain`: it runs with `network_mode: host` so Caddy sees the real client source IP — without host networking, Docker DNAT rewrites every packet to `172.22.0.1` (the bridge gateway) before Caddy sees it, which breaks the `@not_tailnet` remote_ip matcher on `https://server.jehpok.com`. The host network namespace is on the `net` bridge at `172.22.0.0/16`, so Caddy still dials upstream containers by their bridge IP (see Caddyfile). dnsmasq binds to the Tailscale IP only, not `0.0.0.0`.
+The `net` Docker network is `external: true` — create once on a fresh host with `docker network create net --subnet=172.22.0.0/16` (the compose files pin `172.22.0.x` bridge IPs; a default-subnet network rejects them). All inter-container services use `expose`, not `ports`. The exception is `fxmq.net`: it runs with `network_mode: host` so Caddy sees the real client source IP — without host networking, Docker DNAT rewrites every packet to `172.22.0.1` (the bridge gateway) before Caddy sees it, which breaks the `@not_tailnet` remote_ip matcher on `https://shell.fxmq.net`. The host network namespace is on the `net` bridge at `172.22.0.0/16`, so Caddy still dials upstream containers by their bridge IP (see Caddyfile). dnsmasq binds to the Tailscale IP only, not `0.0.0.0`.
 
 ### Per-service edit pointers
 
 When you need to know "what does X do / where do I edit Y", read the file at the path below — the docs don't re-type the contents.
 
-- **`domain`** — vhosts, snippets, header policy: `services/domain/Caddyfile`. Compose + bind mounts + TLS cert path: `services/domain/docker-compose.yml`. Runs `network_mode: host` — see note above.
-- **`cloud`** — Nextcloud env, PHP-FPM pool tuning, bind mounts: `services/cloud/docker-compose.yml` + `services/cloud/php-fpm.d/zz-custom.conf`. Admin creds: `services/cloud/.env` (gitignored — read access only via the operator).
-- **`share`** — Flask routes: `content/share/app.py`. Compose + DB bind mount: `services/share/docker-compose.yml`.
-- **`vault`** — env, bind mount, admin token: `services/vault/docker-compose.yml`.
-- **`kuma`** — image, bind mount, healthcheck: `services/kuma/docker-compose.yml`. Monitor definitions live in Kuma's SQLite, edited via the UI on first run.
-- **`homer`** — dashboard YAML: `services/homer/config/config.yml` (in-repo, bind-mounted live). Homer doesn't auto-reload: edit the YAML, then `make restart-homer` and refresh the browser.
-- **`minecraft`** — Paper server (Java) with Geyser + Floodgate so Bedrock clients can join the same instance. Game ports `25565` (Java) + `19132` TCP+UDP (Bedrock) are published directly on the host (see compose) and bypass Cloudflare at the port layer — Caddy only serves `:80`/`:443`. The dashboard at `server.jehpok.com/mc` (tailnet-only, no auth beyond Tailscale) talks to the game container over rcon via Docker DNS (`RCON_HOST=minecraft`, port `25575`; the port is exposed on `net`, not published to the host). Compose + bind mount: `services/minecraft/docker-compose.yml`. Dashboard source: `content/minecraft/` (Flask; rcon implemented inline with `socket` + `struct` rather than the `mcrcon` PyPI package, which uses `signal.alarm` and breaks under Flask's worker threads). World data: `/var/www/custom/projects/jehpok/minecraft/data` (bind-mounted at `/data` inside the game container; uid 1000).
-- **`terminal`** — ttyd at `server.jehpok.com/shell`, runs as a host systemd unit (not a container). Binary at `/usr/local/bin/ttyd`, unit at `/etc/systemd/system/ttyd.service` (reference copy in `setup/ttyd/ttyd.service`). No systemd sandbox: `ProtectSystem`, `PrivateTmp`, `MemoryDenyWriteExecute`, `PrivateDevices`, `RestrictAddressFamilies`, `LockPersonality`, `RestrictRealtime`, `ProtectControlGroups` are all unset — the operator can write anywhere on the host without a permission hunt. Runs as `debian` (uid 1000) with NOPASSWD sudo, so full host control from the shell. Access control is at the network layer (Tailscale membership + Caddy `@not_tailnet`), not the unit sandbox. Tailscale-only like the rest of `server.jehpok.com`. `make setup` installs the binary (static 1.7.7 from upstream) and the unit; the unit-restoration step is idempotent so re-running `make setup` doesn't break it. Caddy proxies to the host bridge IP `172.22.0.1:7681` with `transport http { versions 1.1 }` (ttyd only speaks HTTP/1.1); the UFW INPUT allow from `172.22.0.0/16 → 7681/tcp` is added by `make setup` and is what makes the bridge → host reach work. ttyd itself binds `172.22.0.1:7681` (host bridge IP, not `0.0.0.0`), so the port is unreachable even from the host's public IP — only via the bridge.
-- **dnsmasq** — config: `setup/dnsmasq/10-tailnet.conf` (live path: `/etc/dnsmasq.d/10-tailnet.conf`). systemd drop-in: `setup/dnsmasq/dnsmasq.service.conf` (live path: `/etc/systemd/system/dnsmasq.service.d/override.conf`).
-- **ollama** — unit: `setup/ollama/ollama.service` (live path: `/etc/systemd/system/ollama.service`).
+- **`fxmq.net`** (Caddy) — vhosts, snippets, header policy: `services/fxmq.net/Caddyfile` (top-level config + per-vhost imports) and `services/fxmq.net/vhosts/*.caddy` (one per hostname: `cloud`, `kuma`, `mc`, `shell`, `vault`, `www`). Compose + bind mounts + custom Dockerfile (Caddy built with the `caddy-dns/cloudflare` plugin for ACME DNS-01): `services/fxmq.net/docker-compose.yml`. Runs `network_mode: host` — see note above. Every vhost has its own `tls { dns cloudflare { env.CF_API_TOKEN } }` block; don't replace it with `tls internal` / `tls off` / `tls self_signed`.
+- **`cloud`** — Nextcloud env, PHP-FPM pool tuning, bind mounts: `services/nextcloud/docker-compose.yml` + `services/nextcloud/php-fpm.d/zz-custom.conf`. Admin creds: `services/nextcloud/.env` (gitignored — read access only via the operator).
+- **`vault`** — env, bind mount, admin token: `services/vaultwarden/docker-compose.yml`.
+- **`kuma`** — image, bind mount, healthcheck: `services/uptimekuma/docker-compose.yml`. Monitor definitions live in Kuma's SQLite (`services/uptimekuma/seed-monitors.sql` seeds them; applied by the installer).
+- **`panel`** — PufferPanel game panel: `services/pufferpanel/docker-compose.yml`. Served at `https://mc.fxmq.net` (Caddy vhost `services/fxmq.net/vhosts/mc.fxmq.net.caddy` → `172.22.0.8:8080`); `/register` is blocked 403 at the edge (registration closed by operator request). The vhost overrides PufferPanel's `max-age=60` on `/js` `/wasm` static assets with 1-day cache headers (panel upgrades self-invalidate via hashed chunk names). SFTP on the bridge at `:5657`; mounts the Docker socket rw (required to start). Admin credentials: `/var/www/custom/projects/homelab/puffer/admin-pass.txt` (created at setup). **`mc.fxmq.net` A record MUST be DNS-only at Cloudflare** (grey cloud): CF's proxy only carries 80/443, so a proxied record breaks the game ports. Caddy's 443 still works DNS-only (DNS-01 cert). After any CF record change, `make restart-dnsmasq`.
+
+  **Template + portable backup**: the deployable PufferPanel server JSON is at `config/pufferpanel/servers/2ecfbe8c.json` (drop into `puffer/data/servers/<id>.json` to deploy). The server's custom config files — `server.properties`, `bukkit.yml`, `spigot.yml`, `config/paper-global.yml`, `config/paper-world-defaults.yml`, `whitelist.json`, `ops.json`, `server-icon.png`, `plugins/{Chunky,StackMob,Geyser-Spigot}/config.yml` (+ StackMob `entity-translation.yml`) — are the portable part for porting to other modloaders; taildrop them as a tarball to `macoslaptop:` (`sudo tailscale file cp <tar> macoslaptop:`).
+
+  **Minecraft server (manual lifecycle — lazymc + mc-idle-sleeper removed 2026-08-28):** the Paper server (`2ecfbe8c`, host-net) binds directly on public Java port `25565` (`server.properties` `server-ip=0.0.0.0` / `server-port=25565`; no proxy in front). The daemon removes the game container on stop and creates a fresh one per start, so `docker start` can't restart a stopped game server — start/stop goes through the panel UI or API (`mc.fxmq.net`, or `POST /api/servers/2ecfbe8c/start|stop` with a `puffer_auth` cookie from `POST /auth/login`). **Bedrock**: Geyser-Spigot plugin on UDP `19132` (default config); UDP 19132 only answers while the server is running. The server runs **online-mode** with **Floodgate** (`auth-type: online`): Bedrock players join as `.<xbox-name>` authenticated via Xbox (no Java account needed — Floodgate bridges them onto the online-mode server), Java players are Mojang session-verified with real skins (the 2026-08-25 offline-mode detour was based on a false Floodgate premise — see `docs/ISSUES.md` Lessons learned), anti-xray enabled (engine 2), `enforce-whitelist=true`. UFW allows `25565/tcp` + `19132/udp`; RCON is disabled. Server JSON: `memory` 3584 (3.5 GiB — live) + Aikar JVM flags, `simulation-distance 4` / `view-distance 8` / `spawn-protection 0`, culling with `keep-spawn-loaded: false`, item despawn 6000 ticks (5 min: `item-despawn-rate` / `arrow` / `trident` in spigot.yml, `alt-item-despawn-rate.items.cobblestone` in paper-world-defaults.yml), world autosave `auto-save-interval` 72000 ticks (1 h), despawn-ranges explicit vanilla (soft 32 / hard 128 blocks), plugins **Chunky** + **StackMob** + **Geyser-Spigot** + **Floodgate** (spark + bStats pre-existing). Whitelist kicks log as one line and show the username in the kick text (custom plugin **WhitelistMsg**, source `config/minecraft/whitelistmsg/`).
+- **`terminal`** — ttyd at `shell.fxmq.net` (root), runs as a host systemd unit (not a container). Binary at `/usr/local/bin/ttyd`, unit at `/etc/systemd/system/ttyd.service` (reference copy in `config/ttyd/ttyd.service`). No systemd sandbox (operator preference: no permission hunts). Runs as `op` with NOPASSWD sudo, so full host control from the shell. Access control is at the network layer (Tailscale membership + Caddy `@not_tailnet`), not the unit sandbox. `make install-config` installs the binary (static 1.7.7 from upstream) and the unit; the step is idempotent. Caddy proxies to the host bridge IP `172.22.0.1:7681` with `transport http { versions 1.1 }` (ttyd only speaks HTTP/1.1); the UFW INPUT allow from `172.22.0.0/16 → 7681/tcp` is added by `make install-config`.
+- **dnsmasq** — config: `config/dnsmasq/10-tailnet.conf` (live path: `/etc/dnsmasq.d/10-tailnet.conf`). systemd drop-in: `config/dnsmasq/dnsmasq.service.conf` (live path: `/etc/systemd/system/dnsmasq.service.d/override.conf`).
+- **goose** — unit: `config/goose/goose.service` (live path: `/etc/systemd/system/goose.service`).
 
 ## Daily maintenance
 
-A systemd timer (`jehpok-daily.timer`, enabled) runs the script in `setup/maintenance/daily.sh` once per day. The script chains three `make` recipes: `make refresh` (apt + image pull + `make up-all`), `make backup-all` (all four backup recipes in order), then `make clean-all` (docker prune + apt autoremove + prune old backups). Run manually with `sudo systemctl start jehpok-daily.service`. Logs to `/var/log/jehpok-daily.log`.
+A systemd timer (`homelab-daily.timer`, enabled) runs the script in `config/maintenance/daily.sh` once per day. The script chains three `make` recipes: `make update` (apt + image pull + `make d-recreate-all`), `make bkp-all` (bkp-cloud + bkp-vault), then `make clean-all` (docker prune + apt autoremove + prune old backups). Run manually with `sudo systemctl start homelab-daily.service`. Logs to `/var/log/homelab-daily.log`.
 
 ## File ownership
 
-The repo is owned by `debian:debian` (the SSH/login user). Edit directly when signed in as `debian`; use `sudo` only if acting as another user. Do not `chown` the repo to a different user.
+The repo is owned by `op:op` (the SSH/login user). Edit directly when signed in as `op`; use `sudo` only if acting as another user. Do not `chown` the repo to a different user.
 
 ## Git remotes
 
-- `jehpok.com` — SSH remote (`git@github.com:friedutch/jehpok.com.git`). The only remote; use for pushes and pulls.
+- `homelab` — SSH remote (`git@github.com:friedutch/homelab.git`). The only remote; use for pushes and pulls.
 
 ```bash
-git push jehpok.com main
+git push homelab main
 ```
 
 ## Operational gotchas
 
-- A deliberate `systemctl stop dnsmasq` takes all tailnet-side `*.jehpok.com` resolution down. Restart with `make restart-dns`.
+- A deliberate `systemctl stop dnsmasq` takes all tailnet-side `*.fxmq.net` resolution down. Restart with `make restart-dnsmasq`.
+- **A panel container restart stops a running game server** — the daemon reconciles at boot: if the game container is running when the panel restarts (e.g. the daily `make update` → `d-recreate-all`), it gracefully stops and removes it; players are kicked (world saved) and the server stays stopped until started manually from the panel. Disruptive but clean.
+- **Bedrock clients can't reach a stopped server** — Geyser lives inside the game server, so UDP 19132 only answers while the server is running.
+- New `*.fxmq.net` CF records can appear "down" on tailnet devices: dnsmasq negative-caches the NXDOMAIN if the hostname was queried before the record existed. After creating a CF record, `make restart-dnsmasq` (see Lessons learned in `docs/ISSUES.md`).
 - The Makefile sets `SHELL := /bin/bash` explicitly. Without it, recipes run under `/bin/sh` (dash on Debian) and `set -eu` semantics differ — `dash` aborts on any unset variable reference, while `bash` only aborts on expansion failures. If you see `parameter not set` from a recipe, the Makefile shell setting is the first place to look.
 - Cloudflare's free tier rate-limits rate-limit rules to a 10s min window. Plan ahead if a public endpoint ends up attracting more traffic than expected.
+- **Every Caddy vhost has its own TLS block** — don't reintroduce a shared wildcard cert. The wildcard CF Origin cert at `$(REPO)/certs/` covered `*.fxmq.net`, so a vhost without its own `tls` directive would pick up the wildcard as a SNI fallback and the per-vhost ACME automation policy would never fire. Lesson: a vhost with no `tls` directive appears to "use ACME by default" but actually picks up any loaded cert that matches the SNI.
+- **Caddy stock `caddy:2.x` doesn't include `caddy-dns/cloudflare`** — needs a custom `xcaddy` build (see `services/fxmq.net/Dockerfile`). Also: `caddy-dns/cloudflare` v0.2.3 rejects the new 53-char CF token format with a generic "API token appears invalid" error during plugin provisioning — pull from `caddy-dns/cloudflare@a8737d0` (master) until a tagged release ships the regex fix.
+- **`caddy:2.11.4` requires Go ≥ 1.25.1** to build — the `golang:1.25-bookworm` image satisfies this. Older builder images (e.g. `golang:1.24-bookworm`) fail with `go: github.com/caddyserver/caddy/v2@v2.11.4 requires go >= 1.25.1`. If you bump Caddy, check the new `go.mod` `go` directive and bump the builder image too.
+- **`network_mode: host` is required for `@not_tailnet` to work.** Docker DNAT rewrites every packet to `172.22.0.1` (the bridge gateway) before Caddy sees it. Without `network_mode: host`, the `100.64.0.0/10` matcher matches nothing and every tailnet request gets 403. This is set in `services/fxmq.net/docker-compose.yml` — do not "fix" it.
+- **`docker compose env_file:` reads the file as the UID running `make`, NOT as the UID inside the container** — compose parses `env_file:` at the host side. The `CF_API_TOKEN` file must be readable by the user running the compose command (`op`), mode 0644; chowning it to the container's uid (201) breaks the read and Caddy ends up with no token.
+- **`make d-recreate-fxmq.net` (or `make d-recreate-all`) takes ~3 minutes on a fresh VPS and prints zero progress** — `docker compose up --build` runs `docker build` in a streaming-tty mode that buffers until the step finishes. The build chain is `golang:1.25-bookworm` → `go install xcaddy` → `xcaddy build --with caddy-dns/cloudflare@a8737d0 v2.11.4` → `FROM caddy:2.11.4` + `COPY --from=builder`. `docker build --progress=plain` shows the steps.
+- **The cert's issuer is the only reliable indicator of which path it took** — `curl -sk` returning 200 means "the listener responded", not "the right cert was served". Check `openssl x509 -noout -issuer` on a fresh `-no-keepalive` handshake. On CF-proxied hosts (every public vhost) the handshake sees Cloudflare's edge cert (issuer `Google Trust Services WE1`), not the origin's — check the origin cert with `openssl s_client -connect 127.0.0.1:443 -servername <host>` from the host instead (issuer should be `Let's Encrypt`).
+- **Host performance tuning** — network stack (`config/sysctl/99-homelab.conf`): BBR + `fq` qdisc, `tcp_fastopen=3`, `tcp_slow_start_after_idle=0`; Docker (`config/docker/daemon.json`): pull concurrency 10/10, `userland-proxy: false` (no compose publishes ports, so no behavior change); dnsmasq (`config/dnsmasq/10-tailnet.conf`): `cache-size=10000`.
