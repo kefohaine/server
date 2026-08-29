@@ -35,9 +35,21 @@ $(foreach s,$(CONTAINERS),$(eval COMPOSE_FILE_$s := services/$s/docker-compose.y
 # so the expansion happens at recipe-expansion time, not recipe-execution time.
 compose-file-of = $(REPO)/repo/$(COMPOSE_FILE_$1)
 
+# fxmq.net needs a local image build; compose v5.5.0 on Debian trixie ships
+# buildx 0.13.1, which is too old for `compose ... --build` (needs >= 0.17).
+# Try the compose build first and fall back to plain `docker build` + compose
+# up (the install.sh pattern) so `make d-recreate-fxmq.net` works everywhere.
 define recreate_rule
 d-recreate-$1:
->$(COMPOSE) $(call compose-file-of,$1) up -d --force-recreate$(if $(filter fxmq.net,$1), --build)
+>@if [ "$1" = "fxmq.net" ]; then \
+    if ! $(COMPOSE) $(call compose-file-of,$1) up -d --force-recreate --build; then \
+      echo "compose build unavailable (buildx < 0.17 on trixie) — falling back to docker build + compose up"; \
+      docker build -t fxmq.net:local $(REPO)/repo/services/fxmq.net \
+        && $(COMPOSE) $(call compose-file-of,$1) up -d --force-recreate; \
+    fi; \
+  else \
+    $(COMPOSE) $(call compose-file-of,$1) up -d --force-recreate; \
+  fi
 endef
 $(foreach s,$(CONTAINERS),$(eval $(call recreate_rule,$s)))
 
@@ -167,6 +179,7 @@ mail-alias-list:
 
 clean-apt:
 >@sudo apt-get -qq autoremove -y
+>@sudo apt-get clean
 
 # Keep the 3 most recent artifacts per backup pattern; delete older.
 # The share/mc patterns match legacy artifacts from the pre-migration
