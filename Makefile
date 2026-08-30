@@ -82,7 +82,7 @@ $(foreach s,$(CONTAINERS),$(eval $(call dok_logs_rule,$s)))
 # builds locally, with the buildx fallback). Used by dok-recreate-all and
 # update — each keeps a self-contained recipe (no chained make targets).
 define dok_recreate_all_cmds
->@for f in $(REPO)/repo/services/*/docker-compose.yml; do \
+@for f in $(REPO)/repo/services/*/docker-compose.yml; do \
     if [ "$$f" = "$(REPO)/repo/services/fxmq.net/docker-compose.yml" ]; then \
       if ! $(COMPOSE) "$$f" up -d --force-recreate --build; then \
         echo "compose build unavailable (buildx < 0.17 on trixie) — falling back to docker build + compose up"; \
@@ -191,21 +191,21 @@ status:
 # Shared bodies for the granular clean-* recipes. cleanup is the umbrella
 # recipe and inlines all three bodies — no chained make targets.
 define clean_docker_cmds
->@docker builder prune -af
->@docker image prune -af
->@docker container prune -f
+@docker builder prune -af
+@docker image prune -af
+@docker container prune -f
 endef
 
 define clean_apt_cmds
->@sudo apt-get -qq autoremove -y
->@sudo apt-get clean
+@sudo apt-get -qq autoremove -y
+@sudo apt-get clean
 endef
 
 define clean_backups_cmds
->@for pattern in cloud-backup-* share-backup-*.db vault-backup-*.tar.gz secrets-bundle-*.tar.gz 'mc-backup-*.tar.gz minecraft-backup-*.tar.gz'; do \
+@for pattern in cloud-backup-* share-backup-*.db vault-backup-*.tar.gz secrets-bundle-*.tar.gz 'mc-backup-*.tar.gz minecraft-backup-*.tar.gz'; do \
     sudo ls -1dt $(REPO)/backups/$$pattern 2>/dev/null | tail -n +4 | sudo xargs -r rm -rf; \
   done
->@echo "Pruned backups older than the 3 most recent per pattern."
+@echo "Pruned backups older than the 3 most recent per pattern."
 endef
 
 clean-docker:
@@ -311,7 +311,7 @@ kuma-import:
 # Shared body: push config/ → live (install-config). deploy inlines this
 # body plus the secrets extraction so it never chains another make target.
 define install_config_cmds
->@if ! command -v ttyd >/dev/null 2>&1; then \
+@if ! command -v ttyd >/dev/null 2>&1; then \
     echo "Installing ttyd..."; \
     curl -fsSL -o /tmp/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64; \
     chmod +x /tmp/ttyd; \
@@ -320,14 +320,14 @@ define install_config_cmds
   else \
     echo "ttyd already installed at $$(command -v ttyd)"; \
   fi
->sudo cp $(REPO)/repo/config/goose/goose.service /etc/systemd/system/goose.service
->sudo cp $(REPO)/repo/config/ssh/50-cloud-init.conf /etc/ssh/sshd_config.d/50-cloud-init.conf
->sudo cp $(REPO)/repo/config/dnsmasq/10-tailnet.conf /etc/dnsmasq.d/10-tailnet.conf
->sudo mkdir -p /etc/systemd/system/dnsmasq.service.d
->sudo cp $(REPO)/repo/config/dnsmasq/dnsmasq.service.conf /etc/systemd/system/dnsmasq.service.d/override.conf
->sudo cp $(REPO)/repo/config/sysctl/99-homelab.conf /etc/sysctl.d/99-homelab.conf
->sudo sysctl --system >/dev/null
->@if ! diff -q /etc/docker/daemon.json $(REPO)/repo/config/docker/daemon.json >/dev/null 2>&1; then \
+sudo cp $(REPO)/repo/config/goose/goose.service /etc/systemd/system/goose.service
+sudo cp $(REPO)/repo/config/ssh/50-cloud-init.conf /etc/ssh/sshd_config.d/50-cloud-init.conf
+sudo cp $(REPO)/repo/config/dnsmasq/10-tailnet.conf /etc/dnsmasq.d/10-tailnet.conf
+sudo mkdir -p /etc/systemd/system/dnsmasq.service.d
+sudo cp $(REPO)/repo/config/dnsmasq/dnsmasq.service.conf /etc/systemd/system/dnsmasq.service.d/override.conf
+sudo cp $(REPO)/repo/config/sysctl/99-homelab.conf /etc/sysctl.d/99-homelab.conf
+sudo sysctl --system >/dev/null
+@if ! diff -q /etc/docker/daemon.json $(REPO)/repo/config/docker/daemon.json >/dev/null 2>&1; then \
     echo "Installing /etc/docker/daemon.json (Docker daemon restart required to take effect)."; \
     sudo mkdir -p /etc/docker; \
     sudo cp $(REPO)/repo/config/docker/daemon.json /etc/docker/daemon.json; \
@@ -335,14 +335,14 @@ define install_config_cmds
   else \
     echo "Docker daemon config already up to date."; \
   fi
->sudo cp $(REPO)/repo/config/ttyd/ttyd.service /etc/systemd/system/ttyd.service
->sudo cp $(REPO)/repo/config/fail2ban/jail.d/sshd.conf /etc/fail2ban/jail.d/sshd.conf
->sudo systemctl enable --now fail2ban
->sudo ufw allow from 172.22.0.0/16 to any port 7681 proto tcp
->sudo systemctl daemon-reload
->sudo systemctl enable --now goose ttyd
->sudo systemctl restart sshd dnsmasq
->@echo "Host install-config complete: goose + ttyd + dnsmasq + fail2ban + sshd enabled."
+sudo cp $(REPO)/repo/config/ttyd/ttyd.service /etc/systemd/system/ttyd.service
+sudo cp $(REPO)/repo/config/fail2ban/jail.d/sshd.conf /etc/fail2ban/jail.d/sshd.conf
+sudo systemctl enable --now fail2ban
+sudo ufw allow from 172.22.0.0/16 to any port 7681 proto tcp
+sudo systemctl daemon-reload
+sudo systemctl enable --now goose ttyd
+sudo systemctl restart sshd dnsmasq
+@echo "Host install-config complete: goose + ttyd + dnsmasq + fail2ban + sshd enabled."
 endef
 
 install-config:
@@ -421,10 +421,9 @@ install-sysctl:
 .PHONY: bundle-secrets install-secrets bundle-config install-config-bundle
 
 define bundle_secrets_cmds
->@dest=$(BKP_DIR)/secrets-bundle-$$(date +%Y%m%d).tar.gz; \
+@dest=$(BKP_DIR)/secrets-bundle-$$(date +%Y%m%d).tar.gz; \
   sudo mkdir -p "$(BKP_DIR)"; \
   sudo tar czf "$$dest" \
-    --warning=no-absolute-names \
     /home/op/.ssh/github_key \
     /home/op/.ssh/github_key.pub \
     /home/op/.ssh/config \
@@ -434,8 +433,8 @@ define bundle_secrets_cmds
     /etc/ssh/sshd_config.d/50-cloud-init.conf \
     /etc/dnsmasq.d/10-tailnet.conf \
     /etc/systemd/system/dnsmasq.service.d/override.conf \
-    /var/lib/tailscale
->@echo "Secrets bundle at $$dest"
+    /var/lib/tailscale; \
+  echo "Secrets bundle at $$dest"
 endef
 
 bundle-secrets:
@@ -444,7 +443,7 @@ bundle-secrets:
 # Extract a secrets bundle tar.gz to the live paths. Defaults to the
 # newest secrets-bundle-*.tar.gz under $(BKP_DIR); override with BUNDLE=<path>.
 define install_secrets_cmds
->@if [ -z "$(BUNDLE)" ]; then \
+@if [ -z "$(BUNDLE)" ]; then \
     BUNDLE="$$(ls -1t $(BKP_DIR)/secrets-bundle-*.tar.gz 2>/dev/null | head -1)"; \
     if [ -z "$$BUNDLE" ]; then \
       echo "No secrets-bundle-*.tar.gz found in $(BKP_DIR)."; \
@@ -454,7 +453,7 @@ define install_secrets_cmds
   else \
     BUNDLE="$(BUNDLE)"; \
   fi; \
-  sudo tar xzf "$$BUNDLE" -C / --warning=no-absolute-names; \
+  sudo tar xzf "$$BUNDLE" -C /; \
   echo "Installed $$BUNDLE to live paths."
 endef
 
@@ -511,7 +510,7 @@ BKP_DIR := $(REPO)/backups
 # Shared bodies: `make backup` inlines them so it stays one self-contained
 # recipe (no chained make targets).
 define bkp_cloud_cmds
->@dest=$(BKP_DIR)/cloud-backup-$$(date +%Y%m%d-%H%M%S); \
+@dest=$(BKP_DIR)/cloud-backup-$$(date +%Y%m%d-%H%M%S); \
   sudo mkdir -p "$(BKP_DIR)" "$$dest"; \
   sudo chown op:op "$$dest"; \
   docker exec -w /var/www/html nextcloud php occ maintenance:mode --on; \
@@ -524,7 +523,7 @@ define bkp_cloud_cmds
 endef
 
 define bkp_vault_cmds
->@dest=$(BKP_DIR)/vault-backup-$$(date +%Y%m%d-%H%M%S).tar.gz; \
+@dest=$(BKP_DIR)/vault-backup-$$(date +%Y%m%d-%H%M%S).tar.gz; \
   sudo mkdir -p "$(BKP_DIR)"; \
   sudo tar czf "$$dest" -C $(REPO)/vault data; \
   echo "Backup at $$dest"
